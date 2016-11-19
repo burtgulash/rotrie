@@ -233,6 +233,19 @@ impl TrieBuilder {
         self.ptr += ba.write(&mut self.bytes, size, x) as u32;
     }
 
+    fn write_min_bytes(&mut self, mut x: u32) {
+        loop {
+            let byte = 0xf & x;
+            self.bytes.push(byte as u8);
+            self.ptr += 1;
+
+            x >>= 8;
+            if x == 0 {
+                break
+            }
+        }
+    }
+
     fn flush_children(&mut self, node: &mut TrieNode) {
         if node.is_terminal {
             return
@@ -248,15 +261,15 @@ impl TrieBuilder {
         let term_lens: Vec<_> = terms.iter().map(|cht| cht.len() as u32).collect();
         let firsts: Vec<_> = terms.iter().map(|ch| *ch.iter().next().unwrap() as u32).collect();
 
-        let ch_ptrs: Vec<_> = node.children.iter().map(|ch| {
+        let ptrs: Vec<_> = node.children.iter().map(|ch| {
                 if ch.is_terminal {
                     ch.term_id
                 } else {
                     node.ptr - ch.ptr
                 }
             }).collect();
-        let ptr_sizes: Vec<_> = ch_ptrs.iter().map(|&ptr| log2(ptr)).collect();
-        println!("CHPTRS: {:?}", ch_ptrs);
+        let ptr_sizes: Vec<_> = ptrs.iter().map(|&ptr| log2(ptr)).collect();
+        println!("CHPTRS: {:?}", ptrs);
 
         let mut ba = BitWriter::new();
         self.write_bits(&mut ba, 4, node_size);
@@ -271,6 +284,16 @@ impl TrieBuilder {
         }
         for &x in &term_lens {
             self.write_bits(&mut ba, 2, x);
+        }
+        for &x in &terms {
+            for &c in x {
+                self.write_bits(&mut ba, 4, c as u32);
+            }
+        }
+        self.ptr += ba.close(&mut self.bytes) as u32;
+
+        for &x in &ptrs {
+            self.write_min_bytes(x);
         }
         // TODO write terms and ptrs
     }
