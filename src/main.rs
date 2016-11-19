@@ -278,9 +278,11 @@ impl TrieBuilder {
     }
 
     fn write_min_bytes(&mut self, mut x: u32) {
+        println!("WRITING MIN: {}", x);
+        let mut tmp = Vec::new();
         loop {
-            let byte = 0xf & x;
-            self.bytes.push(byte as u8);
+            let byte = 0xff & x;
+            tmp.push(byte as u8);
             self.ptr += 1;
 
             x >>= 8;
@@ -288,6 +290,9 @@ impl TrieBuilder {
                 break
             }
         }
+        tmp.reverse();
+        println!("WRITING MIN BYTES: {:?}", &tmp);
+        self.bytes.extend(tmp.iter());
     }
 
     fn flush_children(&mut self, node: &mut TrieNode) {
@@ -331,16 +336,19 @@ impl TrieBuilder {
         for &x in &term_lens {
             self.write_bits(&mut ba, 2, x);
         }
+
+        self.ptr += ba.close(&mut self.bytes) as u32;
+        for &x in &ptrs {
+            self.write_min_bytes(x);
+        }
+
+        let mut ba = BitWriter::new();
         for &x in &terms {
             for &c in x {
                 self.write_bits(&mut ba, 4, c as u32);
             }
         }
         self.ptr += ba.close(&mut self.bytes) as u32;
-
-        for &x in &ptrs {
-            self.write_min_bytes(x);
-        }
     }
 }
 
@@ -381,6 +389,15 @@ impl<'a> Trie<'a> {
         }
     }
 
+    fn assemble_bytes(&self, ptr: usize, n: usize) -> u32 {
+        let mut x = 0;
+        for _ in 0 .. n {
+            x <<= 8;
+            x |= self.bytes[ptr] as u32;
+        }
+        x
+    }
+
     fn print(&self) {
         self.traverse(self.root_ptr);
     }
@@ -390,6 +407,8 @@ impl<'a> Trie<'a> {
         //println!("BS: {:?}", bs);
         let mut br = BitReader::new(bs);
         let size = br.read(4);
+        let header_size_bits = 4 + size * (1 + 4 + 2 + 2);
+        let header_size_bytes = (header_size_bits - 1) / 8 + 1;
 
         let mut are_terminal = Vec::new();
         for _ in 0 .. size {
@@ -407,12 +426,27 @@ impl<'a> Trie<'a> {
         for _ in 0 .. size {
             term_lens.push(br.read(2));
         }
+
+        let mut p = ptr + header_size_bytes as usize;
+        let mut ptrs = Vec::new();
+        for (&is_terminal, &ptr_size) in are_terminal.iter().zip(ptr_sizes.iter()) {
+            let x = self.assemble_bytes(p, ptr_size as usize);
+            p += ptr_size as usize;
+
+            if is_terminal == 1 {
+                ptrs.push(x);
+            } else {
+                ptrs.push(ptr as u32 - x);
+            }
+        }
         println!("SIZE: {}", size);
         println!("TRIE BYTES: {:?}", bs);
         println!("are_terminal: {:?}", &are_terminal);
         println!("firsts: {:?}", &firsts);
         println!("ptr_sizes: {:?}", &ptr_sizes);
         println!("term_lens: {:?}", &term_lens);
+        println!("ptrs: {:?}", &ptrs);
+        println!("---");
 
         // let size = br.read(&);
         // let size = bitunpack(4, 1, bs2x(bs))[0] as usize;
@@ -427,14 +461,14 @@ impl<'a> Trie<'a> {
         // //println!("chts: {:?}", ptrs);
         // //println!("terms: {:?}", terms);
 
-        // for (&is_terminal, &x) in are_terminal.iter().zip(ptrs.iter()) {
-        //     if is_terminal == 1 {
-        //         println!("TERMINAL, id: {}", x);
-        //     } else {
-        //         self.traverse(ptr - x as usize);
-        //         println!("-");
-        //     }
-        // }
+        for (&is_terminal, &x) in are_terminal.iter().zip(ptrs.iter()) {
+            if is_terminal == 1 {
+                println!("TERMINAL, id: {}", x);
+            } else {
+                self.traverse(x as usize);
+                println!("-");
+            }
+        }
     }
 }
 
@@ -459,21 +493,21 @@ fn main() {
     println!("BYTES ({}): {:?}", t.bytes.len(), t.bytes);
     println!("ROOT AT: {}", t.root_ptr);
 
-    let mut bs: Vec<u8> = Vec::new();
-    let mut ba = BitWriter::new();
+    // let mut bs: Vec<u8> = Vec::new();
+    // let mut ba = BitWriter::new();
 
-    let nums = [14, 2, 5, 8, 0, 13, 2, 7, 7, 8];
-    for &x in &nums {
-        ba.write(&mut bs, 4, x);
-    }
+    // let nums = [14, 2, 5, 8, 0, 13, 2, 7, 7, 8];
+    // for &x in &nums {
+    //     ba.write(&mut bs, 4, x);
+    // }
 
-    ba.close(&mut bs);
-    println!("NUMS: {:?}", &nums);
-    println!("BA: {:?}", &bs);
-    for x in &bs {
-        print!("{:08b} ", x);
-    }
-    println!("");
+    // ba.close(&mut bs);
+    // println!("NUMS: {:?}", &nums);
+    // println!("BA: {:?}", &bs);
+    // for x in &bs {
+    //     print!("{:08b} ", x);
+    // }
+    // println!("");
 
 
     let trie = Trie::new(&t.bytes, t.root_ptr as usize);
