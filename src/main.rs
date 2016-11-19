@@ -51,6 +51,50 @@ impl BitWriter {
     }
 }
 
+struct BitReader<'a> {
+    buf: u32,
+    pos: usize,
+    bytes: &'a [u8],
+}
+
+impl<'a> BitReader<'a> {
+    fn new(bytes: &[u8]) -> BitReader {
+        let mut br = BitReader {
+            buf: 0,
+            pos: 0,
+            bytes: bytes,
+        };
+        br.fill();
+        br.fill();
+        br.fill();
+        br.fill();
+        br
+    }
+
+    fn fill(&mut self) {
+        self.buf <<= 8;
+        match self.bytes.split_first() {
+            Some((&head, tail)) => {
+                self.buf |= head as u32;
+                self.bytes = tail;
+            },
+            None => {},
+        };
+    }
+
+    fn read(&mut self, size: usize) -> u32 {
+        while self.pos >= 8 {
+            self.fill();
+            self.pos -= 8;
+        }
+        println!("BUFF {:032b}", self.buf);
+        let mask = (1 << size) - 1;
+        let x = mask & (self.buf >> (32 - size - self.pos));
+        self.pos += size;
+        x
+    }
+}
+
 fn log2(x: u32) -> u32 {
     if x > 0xffffff {
         4
@@ -63,31 +107,31 @@ fn log2(x: u32) -> u32 {
     }
 }
 
-fn bitpack<I: Iterator<Item=u32>>(maxsize: usize, xs: I) -> u32 {
-    let mask = (1 << maxsize) - 1;
-    let mut target = 0u32;
-    for (i, x) in xs.enumerate() {
-        target |= (x & mask) << (32 - maxsize - i);
-    }
-    target.to_be()
-}
-
-fn bitunpack(maxsize: usize, n: usize, bs: u32) -> Vec<u32> {
-    let mask = (1 << maxsize) - 1;
-    // let n = std::mem::size_of::<u32>() * 8 / maxsize;
-    let mut xs = Vec::new();
-    for i in 0 .. n {
-        let x = mask & (bs >> (32 - maxsize - i));
-        xs.push(x);
-    }
-    xs
-}
-
-fn x2bs<'a, T>(x: &'a T) -> &'a [u8] {
-    let ptr: *const _ = unsafe{std::mem::transmute(x as *const _)};
-    let bs: &[u8] = unsafe{std::slice::from_raw_parts(ptr, std::mem::size_of::<T>())};
-    bs
-}
+// fn bitpack<I: Iterator<Item=u32>>(maxsize: usize, xs: I) -> u32 {
+//     let mask = (1 << maxsize) - 1;
+//     let mut target = 0u32;
+//     for (i, x) in xs.enumerate() {
+//         target |= (x & mask) << (32 - maxsize - i);
+//     }
+//     target.to_be()
+// }
+// 
+// fn bitunpack(maxsize: usize, n: usize, bs: u32) -> Vec<u32> {
+//     let mask = (1 << maxsize) - 1;
+//     // let n = std::mem::size_of::<u32>() * 8 / maxsize;
+//     let mut xs = Vec::new();
+//     for i in 0 .. n {
+//         let x = mask & (bs >> (32 - maxsize - i));
+//         xs.push(x);
+//     }
+//     xs
+// }
+// 
+// fn x2bs<'a, T>(x: &'a T) -> &'a [u8] {
+//     let ptr: *const _ = unsafe{std::mem::transmute(x as *const _)};
+//     let bs: &[u8] = unsafe{std::slice::from_raw_parts(ptr, std::mem::size_of::<T>())};
+//     bs
+// }
 
 
 struct TrieNode {
@@ -253,7 +297,6 @@ impl TrieBuilder {
 
         self.phantomize_children(node, 16);
         node.ptr = self.ptr;
-        println!("NODEPTR: {}", node.ptr);
 
         let node_size = node.children.len() as u32;
         let are_terminal: Vec<_> = node.children.iter().map(|ch| ch.is_terminal as u32).collect();
@@ -269,7 +312,10 @@ impl TrieBuilder {
                 }
             }).collect();
         let ptr_sizes: Vec<_> = ptrs.iter().map(|&ptr| log2(ptr)).collect();
+
         println!("CHPTRS: {:?}", ptrs);
+        println!("are_terminal: {:?}", &are_terminal);
+        println!("NODEPTR: {}, NODESIZE: {}", node.ptr, node_size);
 
         let mut ba = BitWriter::new();
         self.write_bits(&mut ba, 4, node_size);
@@ -295,7 +341,6 @@ impl TrieBuilder {
         for &x in &ptrs {
             self.write_min_bytes(x);
         }
-        // TODO write terms and ptrs
     }
 }
 
@@ -343,26 +388,53 @@ impl<'a> Trie<'a> {
     fn traverse(&self, ptr: usize) {
         let bs = &self.bytes[ptr..];
         //println!("BS: {:?}", bs);
-        let size = bitunpack(4, 1, bs2x(bs))[0] as usize;
-        let are_terminal = bitunpack(1, size, bs2x(&bs[4..]));
-        let cht_lens = bitunpack(4, size, bs2x(&bs[8..]));
-        let ptrs = bs2u32(size, &bs[12..]);
-        let terms = bs2u32(size, &bs[12 + size * 4 ..]);
+        let mut br = BitReader::new(bs);
+        let size = br.read(4);
 
-        println!("SIZE: {}", size);
-        //println!("termos: {:?}", are_terminal);
-        //println!("chtlens: {:?}", cht_lens);
-        //println!("chts: {:?}", ptrs);
-        //println!("terms: {:?}", terms);
-
-        for (&is_terminal, &x) in are_terminal.iter().zip(ptrs.iter()) {
-            if is_terminal == 1 {
-                println!("TERMINAL, id: {}", x);
-            } else {
-                self.traverse(ptr - x as usize);
-                println!("-");
-            }
+        let mut are_terminal = Vec::new();
+        for _ in 0 .. size {
+            are_terminal.push(br.read(1));
         }
+        let mut firsts = Vec::new();
+        for _ in 0 .. size {
+            firsts.push(br.read(4));
+        }
+        let mut ptr_sizes = Vec::new();
+        for _ in 0 .. size {
+            ptr_sizes.push(br.read(2));
+        }
+        let mut term_lens = Vec::new();
+        for _ in 0 .. size {
+            term_lens.push(br.read(2));
+        }
+        println!("SIZE: {}", size);
+        println!("TRIE BYTES: {:?}", bs);
+        println!("are_terminal: {:?}", &are_terminal);
+        println!("firsts: {:?}", &firsts);
+        println!("ptr_sizes: {:?}", &ptr_sizes);
+        println!("term_lens: {:?}", &term_lens);
+
+        // let size = br.read(&);
+        // let size = bitunpack(4, 1, bs2x(bs))[0] as usize;
+        // let are_terminal = bitunpack(1, size, bs2x(&bs[4..]));
+        // let cht_lens = bitunpack(4, size, bs2x(&bs[8..]));
+        // let ptrs = bs2u32(size, &bs[12..]);
+        // let terms = bs2u32(size, &bs[12 + size * 4 ..]);
+
+        // println!("SIZE: {}", size);
+        // //println!("termos: {:?}", are_terminal);
+        // //println!("chtlens: {:?}", cht_lens);
+        // //println!("chts: {:?}", ptrs);
+        // //println!("terms: {:?}", terms);
+
+        // for (&is_terminal, &x) in are_terminal.iter().zip(ptrs.iter()) {
+        //     if is_terminal == 1 {
+        //         println!("TERMINAL, id: {}", x);
+        //     } else {
+        //         self.traverse(ptr - x as usize);
+        //         println!("-");
+        //     }
+        // }
     }
 }
 
@@ -387,9 +459,6 @@ fn main() {
     println!("BYTES ({}): {:?}", t.bytes.len(), t.bytes);
     println!("ROOT AT: {}", t.root_ptr);
 
-    // let trie = Trie::new(&t.bytes, t.root_ptr as usize);
-    // trie.print();
-
     let mut bs: Vec<u8> = Vec::new();
     let mut ba = BitWriter::new();
 
@@ -405,4 +474,8 @@ fn main() {
         print!("{:08b} ", x);
     }
     println!("");
+
+
+    let trie = Trie::new(&t.bytes, t.root_ptr as usize);
+    trie.print();
 }
