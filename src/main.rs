@@ -229,6 +229,10 @@ impl TrieBuilder {
         self.ptr += bs.len() as u32;
     }
 
+    fn write_bits(&mut self, ba: &mut BitWriter, size: usize, x: u32) {
+        self.ptr += ba.write(&mut self.bytes, size, x) as u32;
+    }
+
     fn flush_children(&mut self, node: &mut TrieNode) {
         if node.is_terminal {
             return
@@ -239,20 +243,10 @@ impl TrieBuilder {
         println!("NODEPTR: {}", node.ptr);
 
         let node_size = node.children.len() as u32;
-        //let size_mask = node_size << (32 - 4);
-        let size_mask: u32 = bitpack(4, [node_size].into_iter().cloned());
-        println!("SIZE MASK: {:b}, size: {}", size_mask, node_size);
-
-        let terminal_mask = node.children.iter().map(|ch| ch.is_terminal as u32);
-        let t_mask = bitpack(1, terminal_mask);
-
-        let ch_terms: Vec<_> = node.children.iter().map(|ch| &ch.term[node.prefix_len .. ch.prefix_len]).collect();
-        let cht_lens = ch_terms.iter().map(|cht| cht.len() as u32);
-        let mut cht_lens_mask = bitpack(4, cht_lens);
-
-        let firsts: Vec<u32> = ch_terms.iter().map(|ch| *ch.iter().next().unwrap() as u32).collect();
-        let firsts_mask: u32 = bitpack(4, firsts.into_iter());
-        //println!("MASK: {:b}", cht_lens_mask);
+        let are_terminal: Vec<_> = node.children.iter().map(|ch| ch.is_terminal as u32).collect();
+        let terms: Vec<_> = node.children.iter().map(|ch| &ch.term[node.prefix_len .. ch.prefix_len]).collect();
+        let term_lens: Vec<_> = terms.iter().map(|cht| cht.len() as u32).collect();
+        let firsts: Vec<_> = terms.iter().map(|ch| *ch.iter().next().unwrap() as u32).collect();
 
         let ch_ptrs: Vec<_> = node.children.iter().map(|ch| {
                 if ch.is_terminal {
@@ -261,21 +255,24 @@ impl TrieBuilder {
                     node.ptr - ch.ptr
                 }
             }).collect();
+        let ptr_sizes: Vec<_> = ch_ptrs.iter().map(|&ptr| log2(ptr)).collect();
         println!("CHPTRS: {:?}", ch_ptrs);
-        let ptr_sizes = ch_ptrs.iter().map(|&ptr| log2(ptr));
-        let ptr_sizes_mask = bitpack(2, ptr_sizes);
 
-        self.write(x2bs(&size_mask));
-        self.write(x2bs(&t_mask));
-        //self.write(x2bs(&firsts_mask));
-        //self.write(x2bs(&ptr_sizes_mask));
-        self.write(x2bs(&cht_lens_mask));
-        for ch_ptr in &ch_ptrs {
-            self.write(x2bs(ch_ptr));
+        let mut ba = BitWriter::new();
+        self.write_bits(&mut ba, 4, node_size);
+        for &x in &are_terminal {
+            self.write_bits(&mut ba, 1, x);
         }
-        for ch_term in &ch_terms {
-            self.write(x2bs(ch_term));
+        for &x in &firsts {
+            self.write_bits(&mut ba, 4, x);
         }
+        for &x in &ptr_sizes {
+            self.write_bits(&mut ba, 2, x);
+        }
+        for &x in &term_lens {
+            self.write_bits(&mut ba, 2, x);
+        }
+        // TODO write terms and ptrs
     }
 }
 
@@ -367,8 +364,8 @@ fn main() {
     println!("BYTES ({}): {:?}", t.bytes.len(), t.bytes);
     println!("ROOT AT: {}", t.root_ptr);
 
-    let trie = Trie::new(&t.bytes, t.root_ptr as usize);
-    trie.print();
+    // let trie = Trie::new(&t.bytes, t.root_ptr as usize);
+    // trie.print();
 
     let mut bs: Vec<u8> = Vec::new();
     let mut ba = BitWriter::new();
