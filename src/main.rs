@@ -6,25 +6,50 @@ fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
             .count()
 }
 
-// fn output<T, W: Write>(writer: &mut W, x: &T) -> std::io::Result<usize> {
-//     let bytes = unsafe {std::slice::from_raw_parts(
-//         std::mem::transmute(x),
-//         std::mem::size_of::<T>(),
-//     )};
-//     writer.write(&bytes)
-// }
-// 
-// fn output_slice<T, W: Write>(writer: &mut W, xs: &[T]) -> std::io::Result<usize>
-// {
-//     let bytes = unsafe {
-//         std::slice::from_raw_parts(
-//             std::mem::transmute(xs.as_ptr()),
-//             xs.len() * std::mem::size_of::<T>(),
-//         )
-//     };
-//     writer.write(&bytes)
-// }
-// 
+struct BitWriter {
+    buf: u32,
+    pos: usize,
+}
+
+impl BitWriter {
+    fn new() -> BitWriter {
+        BitWriter {
+            buf: 0,
+            pos: 0,
+        }
+    }
+
+    fn write(&mut self, to: &mut Vec<u8>, size: usize, x: u32) -> usize {
+        let written = self.flush(to);
+        let mask = (1 << size) - 1;
+        self.buf |= (x & mask) << (32 - size - self.pos);
+        self.pos += size;
+        written
+    }
+
+    fn flush(&mut self, to: &mut Vec<u8>) -> usize {
+        let mut num_written = 0;
+        while self.pos >= 8 {
+            let byte = self.buf >> 24;
+            self.buf <<= 8;
+            self.pos -= 8;
+
+            to.push(byte as u8);
+            num_written += 1;
+        }
+        num_written
+    }
+
+    fn close(&mut self, to: &mut Vec<u8>) -> usize {
+        let mut num_written = self.flush(to);
+        if self.pos > 0 {
+            let byte = self.buf >> 24;
+            to.push(byte as u8);
+            num_written += 1
+        }
+        num_written
+    }
+}
 
 fn log2(x: u32) -> u32 {
     if x > 0xffffff {
@@ -344,4 +369,20 @@ fn main() {
 
     let trie = Trie::new(&t.bytes, t.root_ptr as usize);
     trie.print();
+
+    let mut bs: Vec<u8> = Vec::new();
+    let mut ba = BitWriter::new();
+
+    let nums = [14, 2, 5, 8, 0, 13, 2, 7, 7, 8];
+    for &x in &nums {
+        ba.write(&mut bs, 4, x);
+    }
+
+    ba.close(&mut bs);
+    println!("NUMS: {:?}", &nums);
+    println!("BA: {:?}", &bs);
+    for x in &bs {
+        print!("{:08b} ", x);
+    }
+    println!("");
 }
