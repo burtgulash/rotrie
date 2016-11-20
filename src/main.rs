@@ -85,10 +85,13 @@ impl<'a> BitReader<'a> {
     }
 
     fn read(&mut self, size: usize) -> u32 {
-        while self.pos >= 8 {
-            self.fill();
-            self.pos -= 8;
+        if 32 - self.pos < size {
+            while self.pos >= 8 {
+                self.fill();
+                self.pos -= 8;
+            }
         }
+
         println!("BUFF {:032b}", self.buf);
         let mask = (1 << size) - 1;
         let x = mask & (self.buf >> (32 - size - self.pos));
@@ -444,15 +447,15 @@ impl<'a> Trie<'a> {
         }
 
 
-        println!("SIZE: {}", size);
-        println!("TRIE BYTES: {:?}", bs);
-        println!("are_terminal: {:?}", &are_terminal);
-        println!("firsts: {:?}", &firsts);
-        println!("ptr_sizes: {:?}", &ptr_sizes);
-        println!("ptrs: {:?}", &ptrs);
-        println!("term_lens: {:?}", &term_lens);
-        println!("terms: {:?}", &terms);
-        println!("---");
+        // println!("SIZE: {}", size);
+        // println!("TRIE BYTES: {:?}", bs);
+        // println!("are_terminal: {:?}", &are_terminal);
+        // println!("firsts: {:?}", &firsts);
+        // println!("ptr_sizes: {:?}", &ptr_sizes);
+        // println!("ptrs: {:?}", &ptrs);
+        // println!("term_lens: {:?}", &term_lens);
+        // println!("terms: {:?}", &terms);
+        // println!("---");
 
         // let size = br.read(&);
         // let size = bitunpack(4, 1, bs2x(bs))[0] as usize;
@@ -472,7 +475,7 @@ impl<'a> Trie<'a> {
                 println!("TERMINAL, id: {}, term: {}", x, &bs2str(&term));
             } else {
                 self.traverse(x as usize, term);
-                println!("-");
+                //println!("-");
             }
         }
     }
@@ -529,5 +532,5 @@ fn main() {
 
 
     let trie = Trie::new(&t.bytes, t.root_ptr as usize);
-    //trie.print();
+    trie.print();
 }
