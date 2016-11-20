@@ -197,6 +197,10 @@ impl TrieBuilder {
             while prefix_len < self.stack[self.st_top()].prefix_len {
                 let mut parent = self.stack.pop().unwrap();
                 parent.children.push(flushed);
+                println!("PARENT NUM CHILDREN: {}", parent.children.len());
+                for ch in &parent.children {
+                    println!("CH: {:?}", &ch.term);
+                }
                 flushed = parent;
 
                 self.flush_children(&mut flushed);
@@ -271,7 +275,7 @@ impl TrieBuilder {
             }
         }
         tmp.reverse();
-        println!("WRITING PTR: {:?}", &tmp);
+        //println!("WRITING PTR: {:?}", &tmp);
         self.bytes.extend(tmp.iter());
     }
 
@@ -286,6 +290,8 @@ impl TrieBuilder {
         println!("SETTING ROOT: {}", self.ptr);
 
         let node_size = node.children.len() as u32;
+        assert!(node_size <= 16);
+
         let are_terminal: Vec<_> = node.children.iter().map(|ch| ch.is_terminal as u32).collect();
         let terms: Vec<_> = node.children.iter().map(|ch| &ch.term[node.prefix_len .. ch.prefix_len]).collect();
         let term_lens: Vec<_> = terms.iter().map(|cht| cht.len() as u32).collect();
@@ -301,15 +307,16 @@ impl TrieBuilder {
             }).collect();
         let ptr_sizes: Vec<_> = ptrs.iter().map(|&ptr| log2(ptr)).collect();
 
-        println!("FLUSH CHILDREN");
-        println!("are_terminal: {:?}", &are_terminal);
-        println!("firsts: {:?}", &firsts);
-        println!("terms_lens: {:?}", &term_lens);
-        println!("ptr_sizes: {:?}", &ptr_sizes);
-        println!("terms: {:?}", &terms);
-        println!("CHPTRS: {:?}", ptrs);
-        // println!("NODEPTR: {}, NODESIZE: {}", node.ptr, node_size);
-        println!("...");
+        // println!("FLUSH CHILDREN");
+        // println!("size: {}", node_size);
+        // println!("are_terminal: {:?}", &are_terminal);
+        // println!("firsts: {:?}", &firsts);
+        // println!("terms_lens: {:?}", &term_lens);
+        // println!("ptr_sizes: {:?}", &ptr_sizes);
+        // println!("terms: {:?}", &terms);
+        // println!("ptrs: {:?}", ptrs);
+        // // println!("NODEPTR: {}, NODESIZE: {}", node.ptr, node_size);
+        // println!("...");
 
         let mut ba = BitWriter::new();
         self.write_bits(&mut ba, 4, node_size - 1);
@@ -370,7 +377,7 @@ impl<'a> Trie<'a> {
         for i in 0 .. n {
             x <<= 8;
             x |= self.bytes[ptr + i] as u32;
-            println!("ASSEMBLING BYTES: {} @ {}", self.bytes[ptr], ptr);
+            // println!("ASSEMBLING BYTES: {} @ {}", self.bytes[ptr], ptr + i);
         }
         x
     }
@@ -415,7 +422,7 @@ impl<'a> Trie<'a> {
         let mut ptrs = Vec::new();
         for (&is_terminal, &ptr_size) in are_terminal.iter().zip(ptr_sizes.iter()) {
             let x = self.assemble_bytes(p, ptr_size as usize);
-            println!("PTR FOUND: {}, n: {}", x, ptr_size);
+            //println!("PTR FOUND: {}, n: {}", x, ptr_size);
             p += ptr_size as usize;
 
             if is_terminal == 1 {
@@ -438,15 +445,21 @@ impl<'a> Trie<'a> {
         }
 
 
+        println!("\nPTR: {}", ptr);
         println!("SIZE: {}", size);
-        println!("TRIE BYTES: {:?}", bs);
+        println!("BYTES:");
+        for &b in bs {
+            print!("{:08b}", b);
+        }
+        println!("");
+        //println!("TRIE BYTES: {:?}", bs);
         println!("are_terminal: {:?}", &are_terminal);
-        // println!("firsts: {:?}", &firsts);
+        // // println!("firsts: {:?}", &firsts);
         println!("ptr_sizes: {:?}", &ptr_sizes);
         println!("ptrs: {:?}", &ptrs);
         println!("term_lens: {:?}", &term_lens);
         println!("terms: {:?}", &terms);
-        println!("---");
+        println!("");
 
         for ((&is_terminal, &x), term) in are_terminal.iter().zip(ptrs.iter()).zip(terms.into_iter()) {
             if is_terminal == 1 {
