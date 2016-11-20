@@ -28,6 +28,7 @@ impl BitWriter {
     }
 
     fn flush(&mut self, to: &mut Vec<u8>) -> usize {
+        println!("WRITE BUF: {:032b}", self.buf);
         let mut num_written = 0;
         while self.pos >= 8 {
             let byte = self.buf >> 24;
@@ -278,7 +279,6 @@ impl TrieBuilder {
     }
 
     fn write_min_bytes(&mut self, mut x: u32) {
-        println!("WRITING MIN: {}", x);
         let mut tmp = Vec::new();
         loop {
             let byte = 0xff & x;
@@ -291,7 +291,6 @@ impl TrieBuilder {
             }
         }
         tmp.reverse();
-        println!("WRITING MIN BYTES: {:?}", &tmp);
         self.bytes.extend(tmp.iter());
     }
 
@@ -318,9 +317,15 @@ impl TrieBuilder {
             }).collect();
         let ptr_sizes: Vec<_> = ptrs.iter().map(|&ptr| log2(ptr)).collect();
 
-        println!("CHPTRS: {:?}", ptrs);
+        println!("FLUSH CHILDREN");
         println!("are_terminal: {:?}", &are_terminal);
+        println!("firsts: {:?}", &firsts);
+        println!("terms_lens: {:?}", &term_lens);
+        println!("ptr_sizes: {:?}", &ptr_sizes);
+        println!("terms: {:?}", &terms);
+        println!("CHPTRS: {:?}", ptrs);
         println!("NODEPTR: {}, NODESIZE: {}", node.ptr, node_size);
+        println!("...");
 
         let mut ba = BitWriter::new();
         self.write_bits(&mut ba, 4, node_size);
@@ -334,7 +339,7 @@ impl TrieBuilder {
             self.write_bits(&mut ba, 2, x);
         }
         for &x in &term_lens {
-            self.write_bits(&mut ba, 2, x);
+            self.write_bits(&mut ba, 4, x);
         }
 
         self.ptr += ba.close(&mut self.bytes) as u32;
@@ -351,19 +356,6 @@ impl TrieBuilder {
         self.ptr += ba.close(&mut self.bytes) as u32;
     }
 }
-
-// fn parse_line(line: &str) -> (Vec<u8>, u32, u32) {
-//     let mut split = line.split("\t");
-// 
-//     let word = split.next().unwrap();
-//     let mut word_bs = word.as_bytes().to_vec();
-//     word_bs.push(0);
-// 
-//     let frequency = split.next().unwrap().parse::<u32>().unwrap();
-//     let old_term_id = split.next().unwrap().parse::<u32>().unwrap();
-// 
-//     (word_bs, frequency, old_term_id)
-// }
 
 struct Trie<'a> {
     bytes: &'a [u8],
@@ -404,10 +396,10 @@ impl<'a> Trie<'a> {
 
     fn traverse(&self, ptr: usize, sofar: Vec<u8>) {
         let bs = &self.bytes[ptr..];
-        //println!("BS: {:?}", bs);
         let mut br = BitReader::new(bs);
+
         let size = br.read(4);
-        let header_size_bits = 4 + size * (1 + 4 + 2 + 2);
+        let header_size_bits = 4 + size * (1 + 4 + 2 + 4);
         let header_size_bytes = (header_size_bits - 1) / 8 + 1;
 
         let mut are_terminal = Vec::new();
@@ -424,7 +416,7 @@ impl<'a> Trie<'a> {
         }
         let mut term_lens = Vec::new();
         for _ in 0 .. size {
-            term_lens.push(br.read(2));
+            term_lens.push(br.read(4));
         }
 
         let mut p = ptr + header_size_bytes as usize;
@@ -444,7 +436,7 @@ impl<'a> Trie<'a> {
         let mut terms = Vec::new();
         for &len in &term_lens {
             let mut term: Vec<u8> = sofar.clone();
-            for _ in 0 .. len + 1 {
+            for _ in 0 .. len {
                 term.push(br.read(4) as u8);
             }
             terms.push(term);
@@ -476,7 +468,7 @@ impl<'a> Trie<'a> {
 
         for ((&is_terminal, &x), term) in are_terminal.iter().zip(ptrs.iter()).zip(terms.into_iter()) {
             if is_terminal == 1 {
-                println!("TERMINAL, id: {}, term: {:?}", x, term);
+                println!("TERMINAL, id: {}, term: {}", x, &bs2str(&term));
             } else {
                 self.traverse(x as usize, term);
                 println!("-");
@@ -484,6 +476,12 @@ impl<'a> Trie<'a> {
         }
     }
 }
+
+fn bs2str(bs: &[u8]) -> String {
+    let t: Vec<_> = bs[..bs.len() - 1].chunks(2).map(|chunk| chunk[1] << 4 | chunk[0]).collect();
+    unsafe{std::str::from_utf8_unchecked(&t)}.to_owned()
+}
+
 
 fn main() {
     let mut words = vec!["kokot", "kroketa", "kok", "kuk", "kokino", "kokinko"];
