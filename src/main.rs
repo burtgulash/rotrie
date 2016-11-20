@@ -92,7 +92,7 @@ impl<'a> BitReader<'a> {
             }
         }
 
-        println!("BUFF {:032b}", self.buf);
+        println!("BUFF {:032b} @ {}", self.buf, self.pos);
         let mask = (1 << size) - 1;
         let x = mask & (self.buf >> (32 - size - self.pos));
         self.pos += size;
@@ -172,7 +172,7 @@ struct TrieBuilder {
 impl TrieBuilder {
     fn new() -> TrieBuilder {
         TrieBuilder {
-            stack: vec![TrieNode::new(0, 0, Vec::new(), false)],
+            stack: vec![TrieNode::new(0, 0, vec![], false)],
             bytes: Vec::new(),
             term_id: 0,
             root_ptr: 0,
@@ -189,6 +189,7 @@ impl TrieBuilder {
             let l = self.st_top();
             let last_word = &self.stack[l].term;
             let prefix_len = common_prefix_len(&word, last_word);
+            println!("PREFIX_LEN: {}", prefix_len);
             (prefix_len, last_word.len())
         };
 
@@ -225,50 +226,27 @@ impl TrieBuilder {
         self.stack.pop().unwrap();
 
         let mut root = self.stack.pop().unwrap();
-        self.root_ptr = self.ptr;
         self.flush_children(&mut root);
     }
 
     fn phantomize_children(&mut self, node: &mut TrieNode, maxlen: usize) {
-        let mut children = std::mem::replace(&mut node.children, Vec::new());
+        let children = std::mem::replace(&mut node.children, Vec::new());
 
-        for ch in children.into_iter() {
-            if ch.prefix_len - node.prefix_len <= maxlen {
-                node.children.push(ch);
-                continue
-            }
-
-            let ch_term = &ch.term[node.prefix_len .. ch.prefix_len];
-
-            let mut p = ch.prefix_len - maxlen;
-            let mut new_node = TrieNode::new(
-                p, ch.term_id, ch.term[.. ch.prefix_len].to_vec(), true
-            );
-            // println!("NEW NODE: {}, {},  {:?}", p, ch.term_id, &ch.term[.. ch.prefix_len]);
-
-            loop {
-                let lower_p = {
-                    if p < node.prefix_len + maxlen {
-                        node.prefix_len
-                    } else {
-                        p - maxlen
-                    }
-                };
-                let mut phantom_node = TrieNode::new(
-                    lower_p, 1337, ch.term[.. p].to_vec(), false
+        println!("PHANTOMIZING2");
+        for mut ch in children.into_iter() {
+            let p = node.prefix_len + maxlen - 1;
+            if ch.prefix_len >= p {
+                let mut phantom = TrieNode::new(
+                    p, 1338, ch.term[.. p].to_vec(), false
                 );
+                phantom.children.push(ch);
+                self.flush_children(&mut phantom);
 
-                phantom_node.children.push(new_node);
-                self.flush_children(&mut phantom_node);
-
-                if lower_p <= node.prefix_len {
-                    node.children.push(phantom_node);
-                    break
-                }
-
-                new_node = phantom_node;
-                p = lower_p;
+                // println!("PHANTOM NODE: {}, {:?}", p, &phantom.term);
+                ch = phantom;
             }
+            node.children.push(ch);
+
         }
     }
 
@@ -304,6 +282,7 @@ impl TrieBuilder {
         }
 
         self.phantomize_children(node, 16);
+        self.root_ptr = self.ptr;
         node.ptr = self.ptr;
 
         let node_size = node.children.len() as u32;
@@ -321,28 +300,30 @@ impl TrieBuilder {
             }).collect();
         let ptr_sizes: Vec<_> = ptrs.iter().map(|&ptr| log2(ptr)).collect();
 
-        // println!("FLUSH CHILDREN");
-        // println!("are_terminal: {:?}", &are_terminal);
-        // println!("firsts: {:?}", &firsts);
-        // println!("terms_lens: {:?}", &term_lens);
-        // println!("ptr_sizes: {:?}", &ptr_sizes);
-        // println!("terms: {:?}", &terms);
-        // println!("CHPTRS: {:?}", ptrs);
+        println!("FLUSH CHILDREN");
+        println!("are_terminal: {:?}", &are_terminal);
+        println!("firsts: {:?}", &firsts);
+        println!("terms_lens: {:?}", &term_lens);
+        println!("ptr_sizes: {:?}", &ptr_sizes);
+        println!("terms: {:?}", &terms);
+        println!("CHPTRS: {:?}", ptrs);
         // println!("NODEPTR: {}, NODESIZE: {}", node.ptr, node_size);
-        // println!("...");
+        println!("...");
 
         let mut ba = BitWriter::new();
-        self.write_bits(&mut ba, 4, node_size);
+        self.write_bits(&mut ba, 4, node_size - 1);
         for &x in &are_terminal {
             self.write_bits(&mut ba, 1, x);
         }
-        for &x in &firsts {
-            self.write_bits(&mut ba, 4, x);
-        }
+        // for &x in &firsts {
+        //     self.write_bits(&mut ba, 4, x - 1);
+        // }
         for &x in &ptr_sizes {
-            self.write_bits(&mut ba, 2, x);
+            println!("PTR SIZE: {}", x);
+            self.write_bits(&mut ba, 2, x - 1);
         }
         for &x in &term_lens {
+            println!("TERM LEN: {}", x);
             self.write_bits(&mut ba, 4, x);
         }
 
@@ -354,8 +335,10 @@ impl TrieBuilder {
         let mut ba = BitWriter::new();
         for &x in &terms {
             for &c in x {
+                println!("WRITE C: {}", c);
                 self.write_bits(&mut ba, 4, c as u32);
             }
+            println!("  /WRITE");
         }
         self.ptr += ba.close(&mut self.bytes) as u32;
     }
@@ -402,25 +385,32 @@ impl<'a> Trie<'a> {
         let bs = &self.bytes[ptr..];
         let mut br = BitReader::new(bs);
 
-        let size = br.read(4);
-        let header_size_bits = 4 + size * (1 + 4 + 2 + 4);
+        let SIZE_BITS = 4;
+        let ARE_TERMINAL_BITS = 1;
+        //let FIRSTS_BITS = 4;
+        let FIRSTS_BITS = 0;
+        let PTR_SIZES_BITS = 2;
+        let TERM_LENS_BITS = 4;
+
+        let size = br.read(SIZE_BITS) as usize + 1;
+        let header_size_bits = SIZE_BITS + size * (ARE_TERMINAL_BITS + FIRSTS_BITS + PTR_SIZES_BITS + TERM_LENS_BITS);
         let header_size_bytes = (header_size_bits - 1) / 8 + 1;
 
         let mut are_terminal = Vec::new();
         for _ in 0 .. size {
-            are_terminal.push(br.read(1));
+            are_terminal.push(br.read(ARE_TERMINAL_BITS));
         }
-        let mut firsts = Vec::new();
-        for _ in 0 .. size {
-            firsts.push(br.read(4));
-        }
+        // let mut firsts = Vec::new();
+        // for _ in 0 .. size {
+        //     firsts.push(br.read(4) + 1);
+        // }
         let mut ptr_sizes = Vec::new();
         for _ in 0 .. size {
-            ptr_sizes.push(br.read(2));
+            ptr_sizes.push(br.read(PTR_SIZES_BITS) + 1);
         }
         let mut term_lens = Vec::new();
         for _ in 0 .. size {
-            term_lens.push(br.read(4));
+            term_lens.push(br.read(TERM_LENS_BITS));
         }
 
         let mut p = ptr + header_size_bytes as usize;
@@ -441,37 +431,28 @@ impl<'a> Trie<'a> {
         for &len in &term_lens {
             let mut term: Vec<u8> = sofar.clone();
             for _ in 0 .. len {
-                term.push(br.read(4) as u8);
+                let x = br.read(4) as u8;
+                println!("READ: {}", x);
+                term.push(x);
             }
+            println!("/READ");
             terms.push(term);
         }
 
 
-        // println!("SIZE: {}", size);
-        // println!("TRIE BYTES: {:?}", bs);
-        // println!("are_terminal: {:?}", &are_terminal);
+        println!("SIZE: {}", size);
+        println!("TRIE BYTES: {:?}", bs);
+        println!("are_terminal: {:?}", &are_terminal);
         // println!("firsts: {:?}", &firsts);
-        // println!("ptr_sizes: {:?}", &ptr_sizes);
-        // println!("ptrs: {:?}", &ptrs);
-        // println!("term_lens: {:?}", &term_lens);
-        // println!("terms: {:?}", &terms);
-        // println!("---");
-
-        // let size = br.read(&);
-        // let size = bitunpack(4, 1, bs2x(bs))[0] as usize;
-        // let are_terminal = bitunpack(1, size, bs2x(&bs[4..]));
-        // let cht_lens = bitunpack(4, size, bs2x(&bs[8..]));
-        // let ptrs = bs2u32(size, &bs[12..]);
-        // let terms = bs2u32(size, &bs[12 + size * 4 ..]);
-
-        // println!("SIZE: {}", size);
-        // //println!("termos: {:?}", are_terminal);
-        // //println!("chtlens: {:?}", cht_lens);
-        // //println!("chts: {:?}", ptrs);
-        // //println!("terms: {:?}", terms);
+        println!("ptr_sizes: {:?}", &ptr_sizes);
+        println!("ptrs: {:?}", &ptrs);
+        println!("term_lens: {:?}", &term_lens);
+        println!("terms: {:?}", &terms);
+        println!("---");
 
         for ((&is_terminal, &x), term) in are_terminal.iter().zip(ptrs.iter()).zip(terms.into_iter()) {
             if is_terminal == 1 {
+                println!("TERM: {:?}, sofar: {:?}", &term, &sofar);
                 println!("TERMINAL, id: {}, term: {}", x, &bs2str(&term));
             } else {
                 self.traverse(x as usize, term);
@@ -482,7 +463,7 @@ impl<'a> Trie<'a> {
 }
 
 fn bs2str(bs: &[u8]) -> String {
-    let t: Vec<_> = bs[..bs.len() - 1].chunks(2).map(|chunk| chunk[1] << 4 | chunk[0]).collect();
+    let t: Vec<_> = bs[..bs.len() - 2].chunks(2).map(|chunk| chunk[1] << 4 | chunk[0]).collect();
     unsafe{std::str::from_utf8_unchecked(&t)}.to_owned()
 }
 
@@ -505,11 +486,14 @@ fn main() {
             toks.push(b >> 4);
         }
         toks.push(0);
+        toks.push(0);
 
-        //println!("toks: {:?}", toks);
+        println!("toks: {:?}", toks);
         t.add(toks);
     }
+    println!("FINISHING...");
     t.finish();
+
     //println!("BYTES ({}): {:?}", t.bytes.len(), t.bytes);
     println!("BYTES ({})", t.bytes.len());
     println!("ROOT AT: {}", t.root_ptr);
