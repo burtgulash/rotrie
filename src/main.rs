@@ -399,10 +399,10 @@ impl<'a> Trie<'a> {
     }
 
     fn print(&self) {
-        self.traverse(self.root_ptr);
+        self.traverse(self.root_ptr, vec![]);
     }
 
-    fn traverse(&self, ptr: usize) {
+    fn traverse(&self, ptr: usize, sofar: Vec<u8>) {
         let bs = &self.bytes[ptr..];
         //println!("BS: {:?}", bs);
         let mut br = BitReader::new(bs);
@@ -439,13 +439,26 @@ impl<'a> Trie<'a> {
                 ptrs.push(ptr as u32 - x);
             }
         }
+
+        let mut br = BitReader::new(&self.bytes[p..]);
+        let mut terms = Vec::new();
+        for &len in &term_lens {
+            let mut term: Vec<u8> = sofar.clone();
+            for _ in 0 .. len + 1 {
+                term.push(br.read(4) as u8);
+            }
+            terms.push(term);
+        }
+
+
         println!("SIZE: {}", size);
         println!("TRIE BYTES: {:?}", bs);
         println!("are_terminal: {:?}", &are_terminal);
         println!("firsts: {:?}", &firsts);
         println!("ptr_sizes: {:?}", &ptr_sizes);
-        println!("term_lens: {:?}", &term_lens);
         println!("ptrs: {:?}", &ptrs);
+        println!("term_lens: {:?}", &term_lens);
+        println!("terms: {:?}", &terms);
         println!("---");
 
         // let size = br.read(&);
@@ -461,11 +474,11 @@ impl<'a> Trie<'a> {
         // //println!("chts: {:?}", ptrs);
         // //println!("terms: {:?}", terms);
 
-        for (&is_terminal, &x) in are_terminal.iter().zip(ptrs.iter()) {
+        for ((&is_terminal, &x), term) in are_terminal.iter().zip(ptrs.iter()).zip(terms.into_iter()) {
             if is_terminal == 1 {
-                println!("TERMINAL, id: {}", x);
+                println!("TERMINAL, id: {}, term: {:?}", x, term);
             } else {
-                self.traverse(x as usize);
+                self.traverse(x as usize, term);
                 println!("-");
             }
         }
