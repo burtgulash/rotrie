@@ -1,3 +1,4 @@
+use std::io::{BufReader,BufRead};
 use std::iter::Iterator;
 
 fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
@@ -28,7 +29,7 @@ impl BitWriter {
     }
 
     fn flush(&mut self, to: &mut Vec<u8>) -> usize {
-        println!("WRITE BUF: {:032b}", self.buf);
+        // println!("WRITE BUF: {:032b}", self.buf);
         let mut num_written = 0;
         while self.pos >= 8 {
             let byte = self.buf >> 24;
@@ -240,7 +241,7 @@ impl TrieBuilder {
             let mut new_node = TrieNode::new(
                 p, ch.term_id, ch.term[.. ch.prefix_len].to_vec(), true
             );
-            println!("NEW NODE: {}, {},  {:?}", p, ch.term_id, &ch.term[.. ch.prefix_len]);
+            // println!("NEW NODE: {}, {},  {:?}", p, ch.term_id, &ch.term[.. ch.prefix_len]);
 
             loop {
                 let lower_p = {
@@ -306,7 +307,7 @@ impl TrieBuilder {
         let are_terminal: Vec<_> = node.children.iter().map(|ch| ch.is_terminal as u32).collect();
         let terms: Vec<_> = node.children.iter().map(|ch| &ch.term[node.prefix_len .. ch.prefix_len]).collect();
         let term_lens: Vec<_> = terms.iter().map(|cht| cht.len() as u32).collect();
-        let firsts: Vec<_> = terms.iter().map(|ch| *ch.iter().next().unwrap() as u32).collect();
+        let firsts: Vec<_> = terms.iter().map(|ch| *ch.iter().next().unwrap_or(&0) as u32).collect();
 
         let ptrs: Vec<_> = node.children.iter().map(|ch| {
                 if ch.is_terminal {
@@ -317,15 +318,15 @@ impl TrieBuilder {
             }).collect();
         let ptr_sizes: Vec<_> = ptrs.iter().map(|&ptr| log2(ptr)).collect();
 
-        println!("FLUSH CHILDREN");
-        println!("are_terminal: {:?}", &are_terminal);
-        println!("firsts: {:?}", &firsts);
-        println!("terms_lens: {:?}", &term_lens);
-        println!("ptr_sizes: {:?}", &ptr_sizes);
-        println!("terms: {:?}", &terms);
-        println!("CHPTRS: {:?}", ptrs);
-        println!("NODEPTR: {}, NODESIZE: {}", node.ptr, node_size);
-        println!("...");
+        // println!("FLUSH CHILDREN");
+        // println!("are_terminal: {:?}", &are_terminal);
+        // println!("firsts: {:?}", &firsts);
+        // println!("terms_lens: {:?}", &term_lens);
+        // println!("ptr_sizes: {:?}", &ptr_sizes);
+        // println!("terms: {:?}", &terms);
+        // println!("CHPTRS: {:?}", ptrs);
+        // println!("NODEPTR: {}, NODESIZE: {}", node.ptr, node_size);
+        // println!("...");
 
         let mut ba = BitWriter::new();
         self.write_bits(&mut ba, 4, node_size);
@@ -484,24 +485,30 @@ fn bs2str(bs: &[u8]) -> String {
 
 
 fn main() {
-    let mut words = vec!["kokot", "kroketa", "kok", "kuk", "kokino", "kokinko"];
-    words.sort();
-    println!("WS: {:?}", &words);
+    //let mut words = vec!["kokot", "kroketa", "kok", "kuk", "kokino", "kokinko"];
+    //words.sort();
+    //println!("WS: {:?}", &words);
 
     let mut t = TrieBuilder::new();
-    for w in &words {
+    let stdin = BufReader::new(std::io::stdin());
+    for line in stdin.lines() {
+        let line = line.unwrap();
+        let line = line.trim();
+
+        println!("{}", line);
         let mut toks = Vec::new();
-        for b in w.as_bytes() {
+        for b in line.as_bytes() {
             toks.push(b & 0xf);
             toks.push(b >> 4);
         }
         toks.push(0);
 
-        println!("toks: {:?}", toks);
+        //println!("toks: {:?}", toks);
         t.add(toks);
     }
     t.finish();
-    println!("BYTES ({}): {:?}", t.bytes.len(), t.bytes);
+    //println!("BYTES ({}): {:?}", t.bytes.len(), t.bytes);
+    println!("BYTES ({})", t.bytes.len());
     println!("ROOT AT: {}", t.root_ptr);
 
     // let mut bs: Vec<u8> = Vec::new();
@@ -522,5 +529,5 @@ fn main() {
 
 
     let trie = Trie::new(&t.bytes, t.root_ptr as usize);
-    trie.print();
+    //trie.print();
 }
