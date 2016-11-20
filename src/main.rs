@@ -271,6 +271,7 @@ impl TrieBuilder {
             }
         }
         tmp.reverse();
+        println!("WRITING PTR: {:?}", &tmp);
         self.bytes.extend(tmp.iter());
     }
 
@@ -282,6 +283,7 @@ impl TrieBuilder {
         self.phantomize_children(node, 16);
         self.root_ptr = self.ptr;
         node.ptr = self.ptr;
+        println!("SETTING ROOT: {}", self.ptr);
 
         let node_size = node.children.len() as u32;
         let are_terminal: Vec<_> = node.children.iter().map(|ch| ch.is_terminal as u32).collect();
@@ -293,20 +295,21 @@ impl TrieBuilder {
                 if ch.is_terminal {
                     ch.term_id
                 } else {
-                    node.ptr - ch.ptr
+                    //node.ptr - ch.ptr
+                    ch.ptr
                 }
             }).collect();
         let ptr_sizes: Vec<_> = ptrs.iter().map(|&ptr| log2(ptr)).collect();
 
-        // println!("FLUSH CHILDREN");
-        // println!("are_terminal: {:?}", &are_terminal);
-        // println!("firsts: {:?}", &firsts);
-        // println!("terms_lens: {:?}", &term_lens);
-        // println!("ptr_sizes: {:?}", &ptr_sizes);
-        // println!("terms: {:?}", &terms);
-        // println!("CHPTRS: {:?}", ptrs);
-        // // println!("NODEPTR: {}, NODESIZE: {}", node.ptr, node_size);
-        // println!("...");
+        println!("FLUSH CHILDREN");
+        println!("are_terminal: {:?}", &are_terminal);
+        println!("firsts: {:?}", &firsts);
+        println!("terms_lens: {:?}", &term_lens);
+        println!("ptr_sizes: {:?}", &ptr_sizes);
+        println!("terms: {:?}", &terms);
+        println!("CHPTRS: {:?}", ptrs);
+        // println!("NODEPTR: {}, NODESIZE: {}", node.ptr, node_size);
+        println!("...");
 
         let mut ba = BitWriter::new();
         self.write_bits(&mut ba, 4, node_size - 1);
@@ -364,9 +367,10 @@ impl<'a> Trie<'a> {
 
     fn assemble_bytes(&self, ptr: usize, n: usize) -> u32 {
         let mut x = 0;
-        for _ in 0 .. n {
+        for i in 0 .. n {
             x <<= 8;
-            x |= self.bytes[ptr] as u32;
+            x |= self.bytes[ptr + i] as u32;
+            println!("ASSEMBLING BYTES: {} @ {}", self.bytes[ptr], ptr);
         }
         x
     }
@@ -411,12 +415,14 @@ impl<'a> Trie<'a> {
         let mut ptrs = Vec::new();
         for (&is_terminal, &ptr_size) in are_terminal.iter().zip(ptr_sizes.iter()) {
             let x = self.assemble_bytes(p, ptr_size as usize);
+            println!("PTR FOUND: {}, n: {}", x, ptr_size);
             p += ptr_size as usize;
 
             if is_terminal == 1 {
                 ptrs.push(x);
             } else {
-                ptrs.push(ptr as u32 - x);
+                //ptrs.push(ptr as u32 - x);
+                ptrs.push(x);
             }
         }
 
@@ -477,6 +483,14 @@ fn main() {
             toks.push(b & 0xf);
             toks.push(b >> 4);
         }
+
+        let mut previous_0 = false;
+        for &x in &toks {
+            if previous_0 && x == 0 {
+                panic!("TONESMI");
+            }
+            previous_0 = x == 0;
+        }
         toks.push(0);
         toks.push(0);
 
@@ -486,6 +500,10 @@ fn main() {
     println!("FINISHING...");
     t.finish();
 
+    println!("");
+    println!("");
+    println!("");
+    println!("");
     //println!("BYTES ({}): {:?}", t.bytes.len(), t.bytes);
     println!("BYTES ({})", t.bytes.len());
     println!("ROOT AT: {}", t.root_ptr);
