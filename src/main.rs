@@ -7,28 +7,31 @@ fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
             .count()
 }
 
-struct BitWriter {
+struct BitWriter<'a> {
+    target: &'a mut Vec<u8>,
     buf: u32,
     pos: usize,
 }
 
-impl BitWriter {
-    fn new() -> BitWriter {
+impl<'a> BitWriter<'a> {
+    fn new(target: &'a mut Vec<u8>) -> BitWriter<'a> {
         BitWriter {
+            target: target,
             buf: 0,
             pos: 0,
         }
     }
 
-    fn write(&mut self, to: &mut Vec<u8>, size: usize, x: u32) -> usize {
-        let written = self.flush(to);
+    fn write(&mut self, size: usize, x: u32) -> usize {
+        assert!(x < (1 << size));
+        let written = self.flush();
         let mask = (1 << size) - 1;
         self.buf |= (x & mask) << (32 - size - self.pos);
         self.pos += size;
         written
     }
 
-    fn flush(&mut self, to: &mut Vec<u8>) -> usize {
+    fn flush(&mut self) -> usize {
         // println!("WRITE BUF: {:032b}", self.buf);
         let mut num_written = 0;
         while self.pos >= 8 {
@@ -36,17 +39,17 @@ impl BitWriter {
             self.buf <<= 8;
             self.pos -= 8;
 
-            to.push(byte as u8);
+            self.target.push(byte as u8);
             num_written += 1;
         }
         num_written
     }
 
-    fn close(&mut self, to: &mut Vec<u8>) -> usize {
-        let mut num_written = self.flush(to);
+    fn close(&mut self) -> usize {
+        let mut num_written = self.flush();
         if self.pos > 0 {
             let byte = self.buf >> 24;
-            to.push(byte as u8);
+            self.target.push(byte as u8);
             num_written += 1
         }
         num_written
@@ -143,7 +146,7 @@ struct TrieNode {
     prefix_len: usize,
     term_id: u32,
     term: Vec<u8>,
-    ptr: u32,
+    ptr: usize,
     is_terminal: bool,
     children: Vec<TrieNode>,
 }
@@ -165,8 +168,8 @@ struct TrieBuilder {
     stack: Vec<TrieNode>,
     bytes: Vec<u8>,
     term_id: u32,
-    root_ptr: u32,
-    ptr: u32,
+    root_ptr: usize,
+    ptr: usize,
 }
 
 impl TrieBuilder {
@@ -255,11 +258,11 @@ impl TrieBuilder {
     fn write(&mut self, bs: &[u8]) {
         //let bs: &[u8] = unsafe{std::slice::from_raw_parts(xs.as_ptr() as *const _, xs.len() * std::mem::size_of::<T>())};
         self.bytes.extend(bs.iter());
-        self.ptr += bs.len() as u32;
+        self.ptr += bs.len();
     }
 
-    fn write_bits(&mut self, ba: &mut BitWriter, size: usize, x: u32) {
-        self.ptr += ba.write(&mut self.bytes, size, x) as u32;
+    fn write_bits(&mut self, ba: &mut BitWriter, size: usize, x: u32) -> usize {
+        ba.write(size, x)
     }
 
     fn write_min_bytes(&mut self, mut x: u32) {
@@ -297,12 +300,12 @@ impl TrieBuilder {
         let term_lens: Vec<_> = terms.iter().map(|cht| cht.len() as u32).collect();
         let firsts: Vec<_> = terms.iter().map(|ch| *ch.iter().next().unwrap_or(&0) as u32).collect();
 
-        let ptrs: Vec<_> = node.children.iter().map(|ch| {
+        let ptrs: Vec<u32> = node.children.iter().map(|ch| {
                 if ch.is_terminal {
                     ch.term_id
                 } else {
                     //node.ptr - ch.ptr
-                    ch.ptr
+                    ch.ptr as u32
                 }
             }).collect();
         let ptr_sizes: Vec<_> = ptrs.iter().map(|&ptr| log2(ptr)).collect();
@@ -318,33 +321,37 @@ impl TrieBuilder {
         // // println!("NODEPTR: {}, NODESIZE: {}", node.ptr, node_size);
         // println!("...");
 
-        let mut ba = BitWriter::new();
-        self.write_bits(&mut ba, 4, node_size - 1);
-        for &x in &are_terminal {
-            self.write_bits(&mut ba, 1, x);
-        }
-        // for &x in &firsts {
-        //     self.write_bits(&mut ba, 4, x - 1);
-        // }
-        for &x in &ptr_sizes {
-            self.write_bits(&mut ba, 2, x - 1);
-        }
-        for &x in &term_lens {
-            self.write_bits(&mut ba, 4, x);
+        {
+            let mut ba = BitWriter::new(&mut self.bytes);
+            self.ptr += ba.write(4, node_size - 1);
+            for &x in &are_terminal {
+                self.ptr += ba.write(1, x);
+            }
+            // for &x in &firsts {
+                    // self.ptr += ba.write(4, x - 1);
+            //     self.write_bits(&mut ba, 4, x - 1);
+            // }
+            for &x in &ptr_sizes {
+                self.ptr += ba.write(2, x - 1);
+            }
+            for &x in &term_lens {
+                self.ptr += ba.write(4, x);
+            }
+
+            self.ptr += ba.close();
         }
 
-        self.ptr += ba.close(&mut self.bytes) as u32;
         for &x in &ptrs {
             self.write_min_bytes(x);
         }
 
-        let mut ba = BitWriter::new();
+        let mut ba = BitWriter::new(&mut self.bytes);
         for &x in &terms {
             for &c in x {
-                self.write_bits(&mut ba, 4, c as u32);
+                self.ptr += ba.write(4, c as u32);
             }
         }
-        self.ptr += ba.close(&mut self.bytes) as u32;
+        self.ptr += ba.close();
     }
 }
 
