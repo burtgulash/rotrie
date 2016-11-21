@@ -271,8 +271,8 @@ impl TrieBuilder {
                 if ch.is_terminal {
                     ch.term_id
                 } else {
-                    //node.ptr - ch.ptr
-                    ch.ptr as u32
+                    (node.ptr - ch.ptr) as u32
+                    //ch.ptr as u32
                 }
             }).collect();
         let ptr_sizes: Vec<_> = ptrs.iter().map(|&ptr| log2(ptr)).collect();
@@ -395,8 +395,8 @@ impl<'a> Trie<'a> {
             if is_terminal == 1 {
                 ptrs.push(x);
             } else {
-                //ptrs.push(ptr as u32 - x);
-                ptrs.push(x);
+                ptrs.push(ptr as u32 - x);
+                //ptrs.push(x);
             }
         }
 
@@ -508,4 +508,6 @@ fn main() {
 
     let trie = Trie::new(&t.bytes, t.root_ptr as usize);
     trie.print();
+
+    println!("SIZE: {}", t.bytes.len());
 }
