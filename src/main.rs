@@ -2,6 +2,14 @@ use std::io::{BufReader,BufRead};
 use std::iter::Iterator;
 use std::mem;
 
+const SIZE_BITS: usize = 4;
+const ARE_TERMINAL_BITS: usize = 1;
+//const FIRSTS_BITS: usize = 4;
+const FIRSTS_BITS: usize = 0;
+const PTR_SIZES_BITS: usize = 2;
+const TERM_LENS_BITS: usize = 4;
+
+
 fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
     a.iter().zip(b.iter())
             .take_while(|&(ac, bc)| ac == bc)
@@ -250,16 +258,6 @@ impl TrieBuilder {
         }
     }
 
-    fn write(&mut self, bs: &[u8]) {
-        //let bs: &[u8] = unsafe{std::slice::from_raw_parts(xs.as_ptr() as *const _, xs.len() * std::mem::size_of::<T>())};
-        self.bytes.extend(bs.iter());
-        self.ptr += bs.len();
-    }
-
-    fn write_bits(&mut self, ba: &mut BitWriter, size: usize, x: u32) -> usize {
-        ba.write(size, x)
-    }
-
     fn write_min_bytes(&mut self, mut x: u32) {
         let mut tmp = Vec::new();
         loop {
@@ -318,19 +316,18 @@ impl TrieBuilder {
 
         {
             let mut ba = BitWriter::new(&mut self.bytes);
-            self.ptr += ba.write(4, node_size - 1);
+            self.ptr += ba.write(SIZE_BITS, node_size - 1);
             for &x in &are_terminal {
-                self.ptr += ba.write(1, x);
+                self.ptr += ba.write(ARE_TERMINAL_BITS, x);
             }
             // for &x in &firsts {
-                    // self.ptr += ba.write(4, x - 1);
-            //     self.write_bits(&mut ba, 4, x - 1);
+                    // self.ptr += ba.write(FIRSTS_BITS, x - 1);
             // }
             for &x in &ptr_sizes {
-                self.ptr += ba.write(2, x - 1);
+                self.ptr += ba.write(PTR_SIZES_BITS, x - 1);
             }
             for &x in &term_lens {
-                self.ptr += ba.write(4, x);
+                self.ptr += ba.write(TERM_LENS_BITS, x);
             }
 
             self.ptr += ba.close();
@@ -391,13 +388,6 @@ impl<'a> Trie<'a> {
     fn traverse(&self, ptr: usize, sofar: Vec<u8>) {
         let bs = &self.bytes[ptr..];
         let mut br = BitReader::new(bs);
-
-        let SIZE_BITS = 4;
-        let ARE_TERMINAL_BITS = 1;
-        //let FIRSTS_BITS = 4;
-        let FIRSTS_BITS = 0;
-        let PTR_SIZES_BITS = 2;
-        let TERM_LENS_BITS = 4;
 
         let size = br.read(SIZE_BITS) as usize + 1;
         let header_size_bits = SIZE_BITS + size * (ARE_TERMINAL_BITS + FIRSTS_BITS + PTR_SIZES_BITS + TERM_LENS_BITS);
