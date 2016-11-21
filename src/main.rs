@@ -4,8 +4,8 @@ use std::mem;
 
 const SIZE_BITS: usize = 4;
 const ARE_TERMINAL_BITS: usize = 1;
-//const FIRSTS_BITS: usize = 4;
-const FIRSTS_BITS: usize = 0;
+const FIRSTS_BITS: usize = 4;
+// const FIRSTS_BITS: usize = 0;
 const PTR_SIZES_BITS: usize = 2;
 const TERM_LENS_BITS: usize = 4;
 
@@ -32,6 +32,7 @@ impl<'a> BitWriter<'a> {
     }
 
     fn write(&mut self, size: usize, x: u32) -> usize {
+        println!("SIZE: {}, x: {}, MAX: {}", size, x, 1 << size);
         assert!(x < (1 << size));
         let written = self.flush();
         let mask = (1 << size) - 1;
@@ -123,33 +124,6 @@ fn log2(x: u32) -> u32 {
         1
     }
 }
-
-// fn bitpack<I: Iterator<Item=u32>>(maxsize: usize, xs: I) -> u32 {
-//     let mask = (1 << maxsize) - 1;
-//     let mut target = 0u32;
-//     for (i, x) in xs.enumerate() {
-//         target |= (x & mask) << (32 - maxsize - i);
-//     }
-//     target.to_be()
-// }
-// 
-// fn bitunpack(maxsize: usize, n: usize, bs: u32) -> Vec<u32> {
-//     let mask = (1 << maxsize) - 1;
-//     // let n = std::mem::size_of::<u32>() * 8 / maxsize;
-//     let mut xs = Vec::new();
-//     for i in 0 .. n {
-//         let x = mask & (bs >> (32 - maxsize - i));
-//         xs.push(x);
-//     }
-//     xs
-// }
-// 
-// fn x2bs<'a, T>(x: &'a T) -> &'a [u8] {
-//     let ptr: *const _ = unsafe{std::mem::transmute(x as *const _)};
-//     let bs: &[u8] = unsafe{std::slice::from_raw_parts(ptr, std::mem::size_of::<T>())};
-//     bs
-// }
-
 
 struct TrieNode {
     prefix_len: usize,
@@ -288,11 +262,11 @@ impl TrieBuilder {
         let node_size = node.children.len() as u32;
         assert!(node_size <= 16);
 
+
         let are_terminal: Vec<_> = node.children.iter().map(|ch| ch.is_terminal as u32).collect();
         let terms: Vec<_> = node.children.iter().map(|ch| &ch.term[node.prefix_len .. ch.prefix_len]).collect();
         let term_lens: Vec<_> = terms.iter().map(|cht| cht.len() as u32).collect();
-        let firsts: Vec<_> = terms.iter().map(|ch| *ch.iter().next().unwrap_or(&0) as u32).collect();
-
+        let firsts: Vec<_> = terms.iter().map(|ch| *ch.iter().next().unwrap() as u32).collect();
         let ptrs: Vec<u32> = node.children.iter().map(|ch| {
                 if ch.is_terminal {
                     ch.term_id
@@ -320,14 +294,15 @@ impl TrieBuilder {
             for &x in &are_terminal {
                 self.ptr += ba.write(ARE_TERMINAL_BITS, x);
             }
-            // for &x in &firsts {
-                    // self.ptr += ba.write(FIRSTS_BITS, x - 1);
-            // }
+            for &x in &firsts {
+                self.ptr += ba.write(FIRSTS_BITS, x);
+            }
             for &x in &ptr_sizes {
                 self.ptr += ba.write(PTR_SIZES_BITS, x - 1);
             }
             for &x in &term_lens {
-                self.ptr += ba.write(TERM_LENS_BITS, x);
+                // -1 is for the 'first' character
+                self.ptr += ba.write(TERM_LENS_BITS, x - 1);
             }
 
             self.ptr += ba.close();
@@ -339,7 +314,7 @@ impl TrieBuilder {
 
         let mut ba = BitWriter::new(&mut self.bytes);
         for &x in &terms {
-            for &c in x {
+            for &c in &x[1..] {
                 self.ptr += ba.write(4, c as u32);
             }
         }
@@ -397,10 +372,10 @@ impl<'a> Trie<'a> {
         for _ in 0 .. size {
             are_terminal.push(br.read(ARE_TERMINAL_BITS));
         }
-        // let mut firsts = Vec::new();
-        // for _ in 0 .. size {
-        //     firsts.push(br.read(4) + 1);
-        // }
+        let mut firsts = Vec::new();
+        for _ in 0 .. size {
+            firsts.push(br.read(4));
+        }
         let mut ptr_sizes = Vec::new();
         for _ in 0 .. size {
             ptr_sizes.push(br.read(PTR_SIZES_BITS) + 1);
@@ -427,8 +402,9 @@ impl<'a> Trie<'a> {
 
         let mut br = BitReader::new(&self.bytes[p..]);
         let mut terms = Vec::new();
-        for &len in &term_lens {
+        for (&len, &first) in term_lens.iter().zip(firsts.iter()) {
             let mut term: Vec<u8> = sofar.clone();
+            term.push(first as u8);
             for _ in 0 .. len {
                 let x = br.read(4) as u8;
                 term.push(x);
@@ -492,7 +468,7 @@ fn main() {
         let mut previous_0 = false;
         for &x in &toks {
             if previous_0 && x == 0 {
-                panic!("TONESMI");
+                panic!("TO NESMI");
             }
             previous_0 = x == 0;
         }
