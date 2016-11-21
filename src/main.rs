@@ -1,5 +1,6 @@
 use std::io::{BufReader,BufRead};
 use std::iter::Iterator;
+use std::mem;
 
 fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
     a.iter().zip(b.iter())
@@ -236,22 +237,16 @@ impl TrieBuilder {
     }
 
     fn phantomize_children(&mut self, node: &mut TrieNode, maxlen: usize) {
-        let children = std::mem::replace(&mut node.children, Vec::new());
-
-        for mut ch in children.into_iter() {
+        for ch in &mut node.children {
             let p = node.prefix_len + maxlen - 1;
             if ch.prefix_len >= p {
                 let mut phantom = TrieNode::new(
                     p, 1338, ch.term[.. p].to_vec(), false
                 );
-                phantom.children.push(ch);
-                self.flush_children(&mut phantom);
-
-                // println!("PHANTOM NODE: {}, {:?}", p, &phantom.term);
-                ch = phantom;
+                mem::swap(ch, &mut phantom);
+                ch.children.push(phantom);
+                self.flush_children(ch);
             }
-            node.children.push(ch);
-
         }
     }
 
