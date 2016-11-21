@@ -1,6 +1,7 @@
 use std::io::{BufReader,BufRead};
 use std::iter::Iterator;
 use std::mem;
+use std::slice;
 
 const SIZE_BITS: usize = 4;
 const ARE_TERMINAL_BITS: usize = 1;
@@ -216,6 +217,8 @@ impl TrieBuilder {
 
         let mut root = self.stack.pop().unwrap();
         self.flush_children(&mut root);
+
+        self.bytes.extend(t2bs((self.root_ptr as u32).to_be()));
     }
 
     fn phantomize_children(&mut self, node: &mut TrieNode, maxlen: usize) {
@@ -330,6 +333,10 @@ struct Trie<'a> {
 fn bs2x(bs: &[u8]) -> u32 {
     let x: &u32 = unsafe{std::mem::transmute(bs.as_ptr())};
     (*x).to_be()
+}
+
+fn t2bs<'a, T: 'a>(x: T) -> &[u8] {
+    unsafe{slice::from_raw_parts(&x as *const _, mem::size_of::<T>())}
 }
 
 fn bs2u32(n: usize, bs: &[u8]) -> &[u32] {
