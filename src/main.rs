@@ -217,7 +217,7 @@ impl TrieBuilder {
 
     fn phantomize_children(&mut self, node: &mut TrieNode, maxlen: usize) {
         for ch in &mut node.children {
-            let p = node.prefix_len + maxlen - 1;
+            let p = node.prefix_len + maxlen;
             assert!(p > node.prefix_len);
             if ch.prefix_len > p {
                 let mut phantom = TrieNode::new(
