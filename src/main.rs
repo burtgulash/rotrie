@@ -70,21 +70,22 @@ impl<'a> BitWriter<'a> {
 struct BitReader<'a> {
     buf: u32,
     pos: usize,
+    advanced_bytes: usize,
     bytes: &'a [u8],
 }
 
 impl<'a> BitReader<'a> {
     fn new(bytes: &[u8]) -> BitReader {
-        let mut br = BitReader {
+        BitReader {
             buf: 0,
-            pos: 0,
+            pos: 32,
+            advanced_bytes: 0,
             bytes: bytes,
-        };
-        br.fill();
-        br.fill();
-        br.fill();
-        br.fill();
-        br
+        }
+    }
+
+    fn advanced_by(&self) -> usize {
+        self.advanced_bytes
     }
 
     fn fill(&mut self) {
@@ -93,17 +94,18 @@ impl<'a> BitReader<'a> {
             Some((&head, tail)) => {
                 self.buf |= head as u32;
                 self.bytes = tail;
+                self.pos -= 8;
+                self.advanced_bytes += 1;
             },
             None => {},
         };
     }
 
     fn read(&mut self, size: usize) -> u32 {
-        if 32 - self.pos < size {
-            while self.pos >= 8 {
-                self.fill();
-                self.pos -= 8;
-            }
+        while 32 - self.pos < size {
+            self.fill();
+            //while self.pos >= 8 {
+            //}
         }
 
         // println!("BUFF {:032b} @ {}", self.buf, self.pos);
@@ -303,21 +305,20 @@ impl TrieBuilder {
                 // -1 is for the 'first' character
                 self.ptr += ba.write(TERM_LENS_BITS, x - 1);
             }
+            for &x in &terms {
+                for &c in &x[1..] {
+                    self.ptr += ba.write(CHAR_BITS, c as u32);
+                }
+            }
 
             self.ptr += ba.close();
         }
 
+        println!("END AT: {}", self.ptr);
         for &x in &ptrs {
             self.write_min_bytes(x);
         }
-
-        let mut ba = BitWriter::new(&mut self.bytes);
-        for &x in &terms {
-            for &c in &x[1..] {
-                self.ptr += ba.write(CHAR_BITS, c as u32);
-            }
-        }
-        self.ptr += ba.close();
+        println!("END AT: {}", self.ptr);
     }
 }
 
@@ -383,23 +384,6 @@ impl<'a> Trie<'a> {
         for _ in 0 .. size {
             term_lens.push(br.read(TERM_LENS_BITS));
         }
-
-        let mut p = ptr + header_size_bytes as usize;
-        let mut ptrs = Vec::new();
-        for (&is_terminal, &ptr_size) in are_terminal.iter().zip(ptr_sizes.iter()) {
-            let x = self.assemble_bytes(p, ptr_size as usize);
-            //println!("PTR FOUND: {}, n: {}", x, ptr_size);
-            p += ptr_size as usize;
-
-            if is_terminal == 1 {
-                ptrs.push(x);
-            } else {
-                ptrs.push(ptr as u32 - x);
-                //ptrs.push(x);
-            }
-        }
-
-        let mut br = BitReader::new(&self.bytes[p..]);
         let mut terms = Vec::new();
         for (&len, &first) in term_lens.iter().zip(firsts.iter()) {
             let mut term: Vec<u8> = sofar.clone();
@@ -424,10 +408,26 @@ impl<'a> Trie<'a> {
         // println!("are_terminal: {:?}", &are_terminal);
         // // // println!("firsts: {:?}", &firsts);
         // println!("ptr_sizes: {:?}", &ptr_sizes);
-        // println!("ptrs: {:?}", &ptrs);
         // println!("term_lens: {:?}", &term_lens);
         // println!("terms: {:?}", &terms);
         // println!("");
+
+        let mut p = ptr + br.advanced_by();
+        let mut ptrs = Vec::new();
+        for (&is_terminal, &ptr_size) in are_terminal.iter().zip(ptr_sizes.iter()) {
+            let x = self.assemble_bytes(p, ptr_size as usize);
+            //println!("PTR FOUND: {}, n: {}", x, ptr_size);
+            p += ptr_size as usize;
+
+            if is_terminal == 1 {
+                ptrs.push(x);
+            } else {
+                ptrs.push(ptr as u32 - x);
+                //ptrs.push(x);
+            }
+        }
+
+        // println!("ptrs: {:?}", &ptrs);
 
         for ((&is_terminal, &x), term) in are_terminal.iter().zip(ptrs.iter()).zip(terms.into_iter()) {
             if is_terminal == 1 {
