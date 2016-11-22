@@ -184,10 +184,6 @@ impl TrieBuilder {
             while prefix_len < self.stack[self.st_top()].prefix_len {
                 let mut parent = self.stack.pop().unwrap();
                 parent.children.push(flushed);
-                println!("PARENT NUM CHILDREN: {}", parent.children.len());
-                for ch in &parent.children {
-                    println!("CH: {:?}", &ch.term);
-                }
                 flushed = parent;
 
                 self.flush_children(&mut flushed);
@@ -222,10 +218,12 @@ impl TrieBuilder {
     fn phantomize_children(&mut self, node: &mut TrieNode, maxlen: usize) {
         for ch in &mut node.children {
             let p = node.prefix_len + maxlen - 1;
-            if ch.prefix_len >= p {
+            assert!(p > node.prefix_len);
+            if ch.prefix_len > p {
                 let mut phantom = TrieNode::new(
                     p, 1338, ch.term[.. p].to_vec(), false
                 );
+                assert!(ch.prefix_len > phantom.prefix_len);
                 mem::swap(ch, &mut phantom);
                 ch.children.push(phantom);
                 self.flush_children(ch);
@@ -267,7 +265,6 @@ impl TrieBuilder {
         let are_terminal: Vec<_> = node.children.iter().map(|ch| ch.is_terminal as u32).collect();
         let terms: Vec<_> = node.children.iter().map(|ch| &ch.term[node.prefix_len .. ch.prefix_len]).collect();
         let term_lens: Vec<_> = terms.iter().map(|cht| cht.len() as u32).collect();
-        println!("terms: {:?}", &terms);
         let firsts: Vec<_> = terms.iter().map(|ch| ch[0]).collect();
         let ptrs: Vec<u32> = node.children.iter().map(|ch| {
                 if ch.is_terminal {
@@ -406,6 +403,7 @@ impl<'a> Trie<'a> {
         let mut terms = Vec::new();
         for (&len, &first) in term_lens.iter().zip(firsts.iter()) {
             let mut term: Vec<u8> = sofar.clone();
+                term.push('|' as u8);
             term.push(first as u8);
             for _ in 0 .. len {
                 let x = br.read(CHAR_BITS) as u8;
@@ -480,7 +478,7 @@ fn main() {
         //toks.push(0);
         toks.push(0);
 
-        println!("toks: {:?}", toks);
+        println!("INSERTING: {}", line);
         t.add(toks);
     }
     println!("FINISHING...");
