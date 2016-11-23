@@ -1,0 +1,2 @@
++ Adapt to nibble characters
++ Put children sizes to parent node instead of are_terminal bitmap

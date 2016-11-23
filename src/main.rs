@@ -278,16 +278,16 @@ impl TrieBuilder {
             }).collect();
         let ptr_sizes: Vec<_> = ptrs.iter().map(|&ptr| log2(ptr)).collect();
 
-        // println!("FLUSH CHILDREN");
-        // println!("size: {}", node_size);
-        // println!("are_terminal: {:?}", &are_terminal);
-        // println!("firsts: {:?}", &firsts);
-        // println!("terms_lens: {:?}", &term_lens);
-        // println!("ptr_sizes: {:?}", &ptr_sizes);
-        // println!("terms: {:?}", &terms);
-        // println!("ptrs: {:?}", ptrs);
-        // // println!("NODEPTR: {}, NODESIZE: {}", node.ptr, node_size);
-        // println!("...");
+        println!("FLUSH CHILDREN");
+        println!("size: {}", node_size);
+        println!("are_terminal: {:?}", &are_terminal);
+        println!("firsts: {:?}", &firsts);
+        println!("terms_lens: {:?}", &term_lens);
+        println!("ptr_sizes: {:?}", &ptr_sizes);
+        println!("terms: {:?}", &terms);
+        println!("ptrs: {:?}", ptrs);
+        // println!("NODEPTR: {}, NODESIZE: {}", node.ptr, node_size);
+        println!("...");
 
         {
             let mut ba = BitWriter::new(&mut self.bytes);
@@ -298,12 +298,12 @@ impl TrieBuilder {
             for &x in &firsts {
                 self.ptr += ba.write(FIRSTS_BITS, x as u32);
             }
-            for &x in &ptr_sizes {
-                self.ptr += ba.write(PTR_SIZES_BITS, x - 1);
-            }
             for &x in &term_lens {
                 // -1 is for the 'first' character
                 self.ptr += ba.write(TERM_LENS_BITS, x - 1);
+            }
+            for &x in &ptr_sizes {
+                self.ptr += ba.write(PTR_SIZES_BITS, x - 1);
             }
             for &x in &terms {
                 for &c in &x[1..] {
@@ -356,6 +356,93 @@ impl<'a> Trie<'a> {
         x
     }
 
+    fn find(&self, query: &[u8]) -> Option<u32> {
+        let mut ptr = self.root_ptr;
+        let mut i = 0;
+        let mut next_char = query[i];
+        'match_it: loop {
+            let bs = &self.bytes[ptr..];
+            let mut br = BitReader::new(bs);
+            let size = br.read(SIZE_BITS) as usize + 1;
+            println!("NODE SIZE: {}", size);
+
+            let mut are_terminal = Vec::new();
+            for _ in 0 .. size {
+                are_terminal.push(br.read(ARE_TERMINAL_BITS));
+            }
+            println!("ARE TERMINAL: {:?}", &are_terminal);
+            for j in 0 .. size {
+                let f = br.read(FIRSTS_BITS) as u8;
+                println!("CAMPARING FIRST: {}, {}", f as char, query[i] as char);
+                if f == query[i] {
+                    i += 1;
+
+                    // Read rest of this loop
+                    for _ in j + 1 .. size {
+                        let f = br.read(FIRSTS_BITS);
+                        println!("REST F: {}", f as u8 as char);
+                    }
+                    let mut term_len = 0;
+                    let mut term_len_to = 0;
+                    let mut term_len_cum = 0;
+                    for k in 0 .. size {
+                        let term_len_tmp = br.read(TERM_LENS_BITS) as usize;
+                        term_len_cum += term_len_tmp;
+                        if k < j {
+                            term_len_to += term_len_tmp;
+                        } else if k == j {
+                            term_len = term_len_tmp;
+                        }
+                    }
+                    println!("TERMLENCUM: {}, term_len: {}", term_len_cum, term_len);
+
+                    let mut ptr_size_to = 0;
+                    let mut ptr_size_cum = 0;
+                    let mut ptr_size = 0;
+                    for k in 0 .. size {
+                        let ptr_size_tmp = br.read(PTR_SIZES_BITS) as usize + 1;
+                        ptr_size_cum += ptr_size_tmp;
+                        if k < j {
+                            ptr_size_to += ptr_size_tmp;
+                        } else if k == j {
+                            ptr_size = ptr_size_tmp;
+                        }
+                    }
+                    println!("PTR SIZE: {}", ptr_size);
+                    for _ in 0 .. term_len_to {
+                        let c = br.read(CHAR_BITS);
+                        println!("DISCARDING CHAR: {}", c as u8 as char);
+                    }
+                    for k in 0 .. term_len {
+                        let c = br.read(CHAR_BITS) as u8;
+                        println!("  COMPARING DALSI({}/{}) '{}', '{}'", k, term_len, c as char, query[i] as char);
+                        if query[i] != c {
+                            return None
+                        }
+                        i += 1;
+                    }
+
+                    let header_size_bits = SIZE_BITS + size * (ARE_TERMINAL_BITS + FIRSTS_BITS + PTR_SIZES_BITS + TERM_LENS_BITS);
+                    let header_size_bytes = (header_size_bits - 1) / 8 + 1;
+
+                    let p = ptr + header_size_bytes + term_len_cum + ptr_size_to;
+                    let x = self.assemble_bytes(p, ptr_size as usize);
+                    println!("X: {}, xsize: {}", x, ptr_size);
+
+                    if are_terminal[j] == 1 {
+                        return Some(x)
+                    } else {
+                        ptr = ptr - x as usize;
+                        // Break child loop
+                        continue 'match_it;
+                    }
+                }
+            }
+
+            return None
+        }
+    }
+
     fn print(&self) {
         self.traverse(self.root_ptr, vec![]);
     }
@@ -365,8 +452,8 @@ impl<'a> Trie<'a> {
         let mut br = BitReader::new(bs);
 
         let size = br.read(SIZE_BITS) as usize + 1;
-        let header_size_bits = SIZE_BITS + size * (ARE_TERMINAL_BITS + FIRSTS_BITS + PTR_SIZES_BITS + TERM_LENS_BITS);
-        let header_size_bytes = (header_size_bits - 1) / 8 + 1;
+        // let header_size_bits = SIZE_BITS + size * (ARE_TERMINAL_BITS + FIRSTS_BITS + PTR_SIZES_BITS + TERM_LENS_BITS);
+        // let header_size_bytes = (header_size_bits - 1) / 8 + 1;
 
         let mut are_terminal = Vec::new();
         for _ in 0 .. size {
@@ -376,13 +463,13 @@ impl<'a> Trie<'a> {
         for _ in 0 .. size {
             firsts.push(br.read(FIRSTS_BITS));
         }
-        let mut ptr_sizes = Vec::new();
-        for _ in 0 .. size {
-            ptr_sizes.push(br.read(PTR_SIZES_BITS) + 1);
-        }
         let mut term_lens = Vec::new();
         for _ in 0 .. size {
             term_lens.push(br.read(TERM_LENS_BITS));
+        }
+        let mut ptr_sizes = Vec::new();
+        for _ in 0 .. size {
+            ptr_sizes.push(br.read(PTR_SIZES_BITS) + 1);
         }
         let mut terms = Vec::new();
         for (&len, &first) in term_lens.iter().zip(firsts.iter()) {
@@ -405,7 +492,7 @@ impl<'a> Trie<'a> {
         // }
         // println!("");
         // //println!("TRIE BYTES: {:?}", bs);
-        // println!("are_terminal: {:?}", &are_terminal);
+        println!("are_terminal: {:?}", &are_terminal);
         // // // println!("firsts: {:?}", &firsts);
         // println!("ptr_sizes: {:?}", &ptr_sizes);
         // println!("term_lens: {:?}", &term_lens);
@@ -511,6 +598,9 @@ fn main() {
 
     let trie = Trie::new(&t.bytes, t.root_ptr as usize);
     trie.print();
-
     println!("SIZE: {}", t.bytes.len());
+
+    let query = "ythagoras";
+    let qresult = trie.find(format!("{}{}", query, "\0").as_bytes());
+    println!("QUERY: {} -> {:?}", query, qresult);
 }
