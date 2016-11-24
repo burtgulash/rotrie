@@ -114,6 +114,13 @@ impl<'a> BitReader<'a> {
         self.pos += size;
         x
     }
+
+    fn skip(&mut self, bits: usize) {
+        self.pos += bits;
+        while self.pos > 32 {
+            self.fill();
+        }
+    }
 }
 
 fn log2(x: u32) -> u32 {
@@ -359,7 +366,6 @@ impl<'a> Trie<'a> {
     fn find(&self, query: &[u8]) -> Option<u32> {
         let mut ptr = self.root_ptr;
         let mut i = 0;
-        let mut next_char = query[i];
         'match_it: loop {
             let bs = &self.bytes[ptr..];
             let mut br = BitReader::new(bs);
@@ -396,23 +402,15 @@ impl<'a> Trie<'a> {
                     }
                     println!("TERMLENCUM: {}, term_len: {}", term_len_cum, term_len);
 
-                    let mut ptr_size_to = 0;
-                    let mut ptr_size_cum = 0;
-                    let mut ptr_size = 0;
-                    for k in 0 .. size {
-                        let ptr_size_tmp = br.read(PTR_SIZES_BITS) as usize + 1;
-                        ptr_size_cum += ptr_size_tmp;
-                        if k < j {
-                            ptr_size_to += ptr_size_tmp;
-                        } else if k == j {
-                            ptr_size = ptr_size_tmp;
-                        }
+                    let mut ptr_sizes_to = 0;
+                    for _ in 0 .. j {
+                        ptr_sizes_to += br.read(PTR_SIZES_BITS) as usize + 1;
                     }
+                    let ptr_size = br.read(PTR_SIZES_BITS) as usize + 1;
+                    br.skip((size - j - 1) * PTR_SIZES_BITS);
                     println!("PTR SIZE: {}", ptr_size);
-                    for _ in 0 .. term_len_to {
-                        let c = br.read(CHAR_BITS);
-                        println!("DISCARDING CHAR: {}", c as u8 as char);
-                    }
+
+                    br.skip(term_len_to * CHAR_BITS);
                     for k in 0 .. term_len {
                         let c = br.read(CHAR_BITS) as u8;
                         println!("  COMPARING DALSI({}/{}) '{}', '{}'", k, term_len, c as char, query[i] as char);
@@ -425,7 +423,7 @@ impl<'a> Trie<'a> {
                     let header_size_bits = SIZE_BITS + size * (ARE_TERMINAL_BITS + FIRSTS_BITS + PTR_SIZES_BITS + TERM_LENS_BITS);
                     let header_size_bytes = (header_size_bits - 1) / 8 + 1;
 
-                    let p = ptr + header_size_bytes + term_len_cum + ptr_size_to;
+                    let p = ptr + header_size_bytes + term_len_cum + ptr_sizes_to;
                     let x = self.assemble_bytes(p, ptr_size as usize);
                     println!("X: {}, xsize: {}", x, ptr_size);
 
@@ -600,7 +598,7 @@ fn main() {
     trie.print();
     println!("SIZE: {}", t.bytes.len());
 
-    let query = "ythagoras";
+    let query = "ristocrats";
     let qresult = trie.find(format!("{}{}", query, "\0").as_bytes());
     println!("QUERY: {} -> {:?}", query, qresult);
 }
